@@ -27,7 +27,6 @@ BACKTITLE="$SCRIPT_NAME (version: $VERSION) - manage EmulationStation mods on yo
 REPO_URL_TEMPLATE="https://github.com/"
 SRC_DIR="$HOME/src"
 RP_SETUP_DIR="$HOME/RetroPie-Setup"
-RP_HELPERS_SH="$RP_SETUP_DIR/scriptmodules/helpers.sh"
 RP_SUPPLEMENTARY_SRC_DIR="$RP_SETUP_DIR/scriptmodules/supplementary"
 RP_PACKAGES_SH="$RP_SETUP_DIR/retropie_packages.sh"
 RP_SUPPLEMENTARY_DIR="/opt/retropie/supplementary"
@@ -167,7 +166,7 @@ function build_es() {
     rpSwap on 512
     cmake . -DFREETYPE_INCLUDE_DIRS=/usr/include/freetype2/ || ret=1
     # following RetroPie user Hex's suggestion [https://retropie.org.uk/forum/post/81034]
-    dialogYesNo "We are ready to compile ${developer}'s \"$branch\" ES branch.\n\nWould you like to omit the 'make clean' before 'make'?\n(compilation will be much faster)" \
+    dialogYesNo "We are ready to compile ${developer}'s \"$branch\" ES branch.\n\nWould you like to skip the 'make clean' before running 'make'?\n(this will make compilation faster if previously compiled)" \
     || make clean
     make || ret=1
     rpSwap off

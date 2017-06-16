@@ -6,18 +6,16 @@
 #
 # Bear in mind that many of those mods are still in development, and you need
 # to know how to fix things if something break.
-#
-# meleu - May-2017
 
 
 # globals ####################################################################
 
-VERSION="delta3"
+VERSION="zeta"
 
 # TESTERS: set NO_WARNING_FLAG to 1 if you don't want that warning message.
 NO_WARNING_FLAG=0
 
-SCRIPT_URL="https://raw.githubusercontent.com/meleu/rp-testers/master/es-tests.sh"
+SCRIPT_URL="https://raw.githubusercontent.com/hex007/es-dev/master/es-tests.sh"
 SCRIPT_DIR="$(dirname "$0")"
 SCRIPT_DIR="$(cd "$SCRIPT_DIR" && pwd)"
 SCRIPT_NAME="$(basename "$0")"
@@ -27,7 +25,6 @@ BACKTITLE="$SCRIPT_NAME (version: $VERSION) - manage EmulationStation mods on yo
 REPO_URL_TEMPLATE="https://github.com/"
 SRC_DIR="$HOME/src"
 RP_SETUP_DIR="$HOME/RetroPie-Setup"
-RP_HELPERS_SH="$RP_SETUP_DIR/scriptmodules/helpers.sh"
 RP_SUPPLEMENTARY_SRC_DIR="$RP_SETUP_DIR/scriptmodules/supplementary"
 RP_PACKAGES_SH="$RP_SETUP_DIR/retropie_packages.sh"
 RP_SUPPLEMENTARY_DIR="/opt/retropie/supplementary"
@@ -55,15 +52,15 @@ function dialogMenu() {
 }
 
 function dialogYesNo() {
-    dialog --no-mouse --backtitle "$BACKTITLE" --yesno "$@" 15 75 2>&1 > /dev/tty
+    dialog --no-mouse --colors --backtitle "$BACKTITLE" --yesno "$@" 15 75 2>&1 > /dev/tty
 }
 
 function dialogMsg() {
-    dialog --no-mouse --ok-label "OK" --backtitle "$BACKTITLE" --msgbox "$@" 20 70 2>&1 > /dev/tty
+    dialog --no-mouse --colors --ok-label "OK" --backtitle "$BACKTITLE" --msgbox "$@" 15 70 2>&1 > /dev/tty
 }
 
 function dialogInfo {
-    dialog --infobox "$@" 8 50 2>&1 >/dev/tty
+    dialog --colors --infobox "$@" 8 50 2>&1 >/dev/tty
 }
 
 # end of dialog functions ###################################################
@@ -77,6 +74,7 @@ function main_menu() {
             --ok-label OK --cancel-label Exit \
             --menu "What do you want to do?" 17 75 10 \
             B "Build an ES repo/branch from the list" \
+            L "Launch ES build using repo/branch from the list" \
             E "Edit the ES repo/branch list" \
             C "Choose an installed ES branch to be the default" \
             R "Remove an installed unofficial ES branch" \
@@ -85,6 +83,7 @@ function main_menu() {
 
         case "$choice" in
             B)  build_es_branch_menu ;;
+            L)  launch_es_branch_menu ;;
             E)  edit_repo_branch_menu ;;
             C)  set_default_es_menu ;;
             R)  remove_installed_es_menu ;;
@@ -130,11 +129,14 @@ function es_download_build_install() {
     || return
 
     dialogInfo "Downloading source files for ${developer}'s $branch ES branch..."
-    if ! git_pull_or_clone "$es_src_dir" "$repo" "$branch"; then
-        dialogMsg "Failed to download ${developer}'s $branch ES branch source code.\n\nCheck your connection and try again."
-        return 1
-    fi
-
+    
+    # Clone repo on branch. If repo present then pull latest updates.
+    # If pull fails then abort merge and pull selcting all changes from remote.
+    # If that fails too then display error message.
+(    git clone -b "$branch" "$repo" "$es_src_dir" 2> /dev/null ) || \
+(    git -C "$es_src_dir" pull || ( git -C "$es_src_dir" merge --abort && git -C "$es_src_dir" pull -X theirs ) ) || \
+(    dialogMsg "Failed to download ${developer}'s $branch ES branch.\n\nPlease, check your connection and try again." && return 1 )
+    
     dialogInfo "Building ${developer}'s $branch ES branch..."
     if ! build_es; then
         echo "====== W A R N I N G !!! ======"
@@ -144,9 +146,130 @@ function es_download_build_install() {
         dialogMsg "Failed to build ${developer}'s $branch ES branch. :(\n\n(you should have seen the error messages, right?)"
         return 1
     fi
+    
+    while true; do
+        dialog  --no-mouse --colors \
+            --backtitle "$BACKTITLE" \
+            --ok-label "Launch" \
+            --extra-button --extra-label "Install" \
+            --cancel-label "Back" \
+            --yesno "SUCCESS!\n\nThe \Zb${developer}'s\ZB EmulationStation \Zb$branch\ZB branch was successfully built!\n\nWhat would you like to do now?" 15 75
+        
+        case $? in
+            0 ) run_es || return 1;;
+            3 ) install_es || return 1;;
+            * ) return 0;;
+        esac
+    done
+}
 
+
+function build_es() {
+    local ret=0
+    local make_clean_flag=0
+    dir=`pwd`
+    
+    # Find how may processors we can spare for compilation. If running on faster than dual core use 2 less
+    proc=$(( `nproc` >= 4 ? `nproc`-2 : 1 ))
+
+    # Check if running on Arm6 ie. Pi 0/1
+    if [[ `uname -m` == "armv6l" ]]; then
+        # Remove additional swap
+        rpSwap on 512
+    fi
+
+    cd "$es_src_dir"
+    git submodule update --init --recursive
+    mkdir -p build
+    cd build
+    cmake .. -DFREETYPE_INCLUDE_DIRS=/usr/include/freetype2/ || ret=1
+    # following RetroPie user Hex's suggestion [https://retropie.org.uk/forum/post/81034]
+    dialogYesNo "We are ready to compile \Zb${developer}'s \"$branch\"\ZB ES branch.\n\nWould you like to skip 'make clean' before running 'make'?\n\n\ZbNote\ZB : This will make compilation faster if previously compiled." \
+    || make clean
+    make -j $proc || ret=1
+    cd $dir
+    
+    # Check if running on Arm6 ie. Pi 0/1
+    if [[ `uname -m` == "armv6l" ]]; then
+        # Remove additional swap
+        rpSwap off
+    fi
+    
+    return $ret
+}
+
+function launch_es_branch_menu() {
+    if [[ ! -s "$REPO_FILE_FULL" ]]; then
+        dialogMsg "\"$REPO_FILE\" is empty!\n\nAdd some ES repo/branch first."
+        return 1
+    fi
+
+    local options=()
+    local choice
+    local i
+
+    while true; do
+        i=1
+        options=()
+        while read -r repo branch; do
+            options+=( $((i++)) "$repo ~ $branch" )
+        done < "$REPO_FILE_FULL"
+        choice=$(dialogMenu "List of available ES repository/branch to download, build and install (from \"$REPO_FILE\")." "${options[@]}") \
+        || return 1
+        repo=$(  echo "${options[2*choice-1]}" | tr -d ' ' | cut -d'~' -f1)
+        branch=$(echo "${options[2*choice-1]}" | tr -d ' ' | cut -d'~' -f2)
+        
+        local developer=$(echo "$repo" | sed "s#.*https://github.com/\([^/]*\)/.*#\1#")
+        local es_src_dir=$(friendly_repo_branch_name)
+        es_src_dir="$SRC_DIR/$es_src_dir"
+        run_es
+    done
+}
+
+function run_es() {
+    $es_src_dir/emulationstation || ( dialogMsg "You must first compile the repo and branch : \n\n $repo ~ $branch" && return 1 )
+}
+
+function install_es() {
+    local ret=0
+    
+    if [ ! -f "$es_src_dir/emulationstation" ]; then
+        dialogMsg "Failed to install ${developer}'s $branch ES branch. Binary not found.\n\n\ZbNote : You must first compile the binary from BUILD menu.\ZB"
+        return 1
+    fi
+        
+    
+    # Handle installation on Linux System (!Raspberry pi)
+    if [[ `uname -m` != arm* ]]; then
+        dialogYesNo "\ZbNote : You are not running this on Raspberry Pi.\ZB\nES will be installed in '/usr/bin/'.\n\nWould you like to continue?" \
+        || return 0
+        
+        ( sudo cp -f "$es_src_dir/emulationstation" "/usr/bin/emulationstation" || \
+            ( read -t 30 -p "Look for error messages above. Press <enter> to continue."
+                dialogMsg "Failed to install ${developer}'s $branch ES branch. :(\n\n(you should have seen the error messages, right?)"
+                return 1 
+            ) \
+        ) \
+        && dialogMsg "SUCCESS!\n\nThe ${developer}'s EmulationStation $branch branch was successfully installed!\n\nThis ES version is now the default emulationstation on your system.\n\nYou can choose which ES version will be the default one using the \"C\" option at Main Menu."
+        return 0
+    fi
+    
+    # Handle installation on Raspberry Pi
     dialogInfo "Installing ${developer}'s $branch ES branch in \"$es_install_dir\"."
-    if ! install_es; then
+
+    sudo mkdir -p "$es_install_dir"
+    sudo cp -f "$es_src_dir/CREDITS.md" "$es_install_dir/"
+    sudo cp -f "$es_src_dir/emulationstation" "$es_install_dir/" || ret=1
+    sudo cp -f "$es_src_dir/emulationstation.sh" "$es_install_dir/" || ret=1
+    sudo cp -f "$es_src_dir/GAMELISTS.md" "$es_install_dir/"
+    sudo cp -f "$es_src_dir/README.md" "$es_install_dir/"
+    sudo cp -f "$es_src_dir/THEMES.md" "$es_install_dir/"
+
+    if ret; then
+        rp_scriptmodule_action configure || ret=1
+    fi
+
+    if ! ret; then
         echo "====== W A R N I N G !!! ======"
         echo "= SOMETHING WRONG HAPPENED!!! ="
         echo "==============================="
@@ -154,40 +277,9 @@ function es_download_build_install() {
         dialogMsg "Failed to install ${developer}'s $branch ES branch in \"$es_install_dir\". :(\n\n(you should have seen the error messages, right?)"
         return 1
     fi
-
+    
     dialogMsg "SUCCESS!\n\nThe ${developer}'s EmulationStation $branch branch was successfully installed!\n\nThis ES version is now the default emulationstation on your system.\n\nYou can choose which ES version will be the default one using the \"C\" option at Main Menu."
-}
-
-
-function build_es() {
-    local ret=0
-    local make_clean_flag=0
-
-    cd "$es_src_dir"
-    rpSwap on 512
-    cmake . -DFREETYPE_INCLUDE_DIRS=/usr/include/freetype2/ || ret=1
-    # following RetroPie user Hex's suggestion [https://retropie.org.uk/forum/post/81034]
-    dialogYesNo "We are ready to compile ${developer}'s \"$branch\" ES branch.\n\nWould you like to omit the 'make clean' before 'make'?\n(compilation will be much faster)" \
-    || make clean
-    make || ret=1
-    rpSwap off
-    cd -
-    return $ret
-}
-
-
-function install_es() {
-    local ret=0
-
-    sudo mkdir -p "$es_install_dir"
-    sudo cp -f "$es_src_dir/CREDITS.md" "$es_install_dir/"
-    sudo cp -f "$es_src_dir/emulationstation" "$es_install_dir/" || return 1
-    sudo cp -f "$es_src_dir/emulationstation.sh" "$es_install_dir/" || return 1
-    sudo cp -f "$es_src_dir/GAMELISTS.md" "$es_install_dir/"
-    sudo cp -f "$es_src_dir/README.md" "$es_install_dir/"
-    sudo cp -f "$es_src_dir/THEMES.md" "$es_install_dir/"
-
-    rp_scriptmodule_action configure || return 1
+    return 0
 }
 
 
@@ -312,33 +404,36 @@ function validate_repo_branch() {
 
 
 function set_default_es_menu() {
+    # List all repositories available. If user requests for an install just copy
+    # the binary. If binary is missing then notify user that they have not built
+    # the binary. If repo is altogether missing then notify user that they have not
+    # downloaded sources at all.
+    
+    if [[ ! -s "$REPO_FILE_FULL" ]]; then
+        dialogMsg "\"$REPO_FILE\" is empty!\n\nAdd some ES repo/branch first."
+        return 1
+    fi
+
     local options=()
     local choice
     local i
-    local es_branch
 
-    while true; do
-        i=1
-        options=()
-        for es_branch in $(get_installed_branches); do
-            options+=( $((i++)) "$es_branch" )
-        done
-
-        choice=$(dialogMenu "List of installed ES branches on \"$RP_SUPPLEMENTARY_DIR\".\n\nWhich one do you want to set as the default emulationstation?" "${options[@]}") \
-        || return 1
-        es_branch="${options[2*choice-1]}"
-
-        dialogYesNo "Are you sure you want to set the \"$es_branch\" ES branch as the default one?" \
-        || continue
-
-        if rp_scriptmodule_action configure "$es_branch"; then
-            dialogMsg "SUCCESS!\n\nThe \"$es_branch\" ES branch is now the default emulationstation!"
-            return 0
-        else
-            dialogMsg "FAIL!!\n\nFailed to set the \"$es_branch\" ES branch as the default emulationstation."
-            return 1
-        fi
-    done
+    i=1
+    options=()
+    while read -r repo branch; do
+        options+=( $((i++)) "$repo ~ $branch" )
+    done < "$REPO_FILE_FULL"
+    choice=$(dialogMenu "List of available ES repository/branch to install (from \"$REPO_FILE\")." "${options[@]}") \
+    || return 1
+    repo=$(  echo "${options[2*choice-1]}" | tr -d ' ' | cut -d'~' -f1)
+    branch=$(echo "${options[2*choice-1]}" | tr -d ' ' | cut -d'~' -f2)
+    
+    local developer=$(echo "$repo" | sed "s#.*https://github.com/\([^/]*\)/.*#\1#")
+    local es_src_dir=$(friendly_repo_branch_name)
+    es_src_dir="$SRC_DIR/$es_src_dir"
+    
+    # Install and return. Only continue if error on install
+    (install_es || return 1 ) && return 0
 }
 
 
@@ -429,52 +524,35 @@ function update_script() {
     return 1
 }
 
-
-function git_pull_or_clone() {
-    local dir="$1"
-    local repo="$2"
-    local branch="$3"
-    [[ -z "$branch" ]] && branch="master"
-
-    if [[ -d "$dir/.git" ]]; then
-        pushd "$dir" > /dev/null
-        if ! git pull; then
-            git merge --abort && git pull -X theirs || return 1
-        fi
-        git submodule update --init --recursive || return 1
-        popd > /dev/null
-    else
-        git clone --recursive --depth 1 --branch "$branch" "$repo" "$dir" || return 1
-    fi
-}
-
-
-# borrowed code from RetroPie-Setup/scriptmodules/helpers.sh
+## @fn rpSwap()
+## @param command *on* to add swap if needed and *off* to remove later
+## @param memory total memory needed (swap added = memory needed - available memory)
+## @brief Adds additional swap to the system if needed.
 function rpSwap() {
     local command=$1
-    local swapfile="/tmp/swap"
+    local swapfile="$__swapdir/swap"
     case $command in
         on)
             rpSwap off
             local memory=$(free -t -m | awk '/^Total:/{print $2}')
             local needed=$2
             local size=$((needed - memory))
+            mkdir -p "$__swapdir/"
             if [[ $size -ge 0 ]]; then
                 echo "Adding $size MB of additional swap"
                 fallocate -l ${size}M "$swapfile"
                 chmod 600 "$swapfile"
                 mkswap "$swapfile"
-                sudo swapon "$swapfile"
+                swapon "$swapfile"
             fi
             ;;
         off)
             echo "Removing additional swap"
-            sudo swapoff "$swapfile" 2>/dev/null
+            swapoff "$swapfile" 2>/dev/null
             rm -f "$swapfile"
             ;;
     esac
 }
-
 
 # START HERE #################################################################
 

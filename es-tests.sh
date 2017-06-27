@@ -39,7 +39,6 @@ if [[ "$NO_WARNING_FLAG" == 0 ]]; then
     || exit
 fi
 
-
 # dialog functions ##########################################################
 
 function dialogMenu() {

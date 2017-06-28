@@ -12,7 +12,7 @@
 
 # globals ####################################################################
 
-VERSION="delta4"
+VERSION="epsilon"
 
 # TESTERS: set NO_WARNING_FLAG to 1 if you don't want that warning message.
 NO_WARNING_FLAG=0
@@ -247,7 +247,8 @@ function edit_repo_branch_menu() {
     local branch
 
     while true; do
-        options=(A "Add an ES branch to the list" "")
+        options=( L "Load ES branches list from open PRs in RetroPie repo" "")
+        options+=(A "Add an ES branch to the list" "")
         [[ -s "$REPO_FILE_FULL" ]] && options+=(D "DELETE ALL BRANCHES IN THE LIST" "")
 
         while read -r line_number repo branch description; do
@@ -259,6 +260,8 @@ function edit_repo_branch_menu() {
         || return 1
 
         case "$choice" in
+            L)  load_open_pull_requests_info
+                ;;
             A)  add_repo_branch
                 ;;
             D)  dialogYesNo "Are you sure you want to delete every single entry in \"$REPO_FILE_FULL\"?" \
@@ -290,9 +293,9 @@ function add_repo_branch() {
             "description:" 3 1 "$new_branch" 3 13 80 0 \
             2>&1 > /dev/tty)
         ) || return 1
-        new_repo="${form[0]}"
+        new_repo="${form[0]%.git}"
         new_branch="${form[1]}"
-        new_description="${form[@]:1}"
+        new_description="${form[@]:2}"
 
         dialogInfo "Adding \"$new_branch\" to the the list.\nPlease wait..."
         validate_repo_branch "$new_repo" "$new_branch" || continue
@@ -303,7 +306,7 @@ function add_repo_branch() {
 
 
 function validate_repo_branch() {
-    local repo="$(echo $1 | sed 's/\.git$//')"
+    local repo="$1"
     local branch="$2"
 
     if grep -qi "$repo *$branch" "$REPO_FILE_FULL" 2> /dev/null; then
@@ -493,6 +496,39 @@ function rpSwap() {
             rm -f "$swapfile"
             ;;
     esac
+}
+
+
+function load_open_pull_requests_info() {
+    local json="/tmp/esPRs.json"
+    local repos=()
+    local branches=()
+    local descriptions=()
+    local oldIFS
+    local i
+
+    dialogInfo "Loading open Pull Requests info from RetroPie/EmulationStation repository..."
+    curl -s "https://api.github.com/repos/RetroPie/EmulationStation/pulls?status=open" -o "$json"
+    
+    oldIFS="$IFS"
+    IFS=$'\n'
+    repos=( $(jq -r '.[] | .head.repo.html_url' "$json") )
+    branches=( $(jq -r '.[] | .head.ref' "$json") )
+    descriptions=( $(jq -r '.[] | .title' "$json") )
+    IFS="$oldIFS"
+
+    for i in $(seq 0 ${#repos[@]}); do
+        [[ -z "${repos[i]}" || -z "${branches[i]}" ]] && continue
+
+        line_number=$(grep -ni "${repos[i]} ${branches[i]}" "$REPO_FILE_FULL" | cut -d: -f1)
+        if [[ "$line_number" =~ ^[0-9]+$ ]]; then
+            sed -i "${line_number}c ${repos[i]} ${branches[i]} ${descriptions[i]}" "$REPO_FILE_FULL"
+        else
+            echo "${repos[i]} ${branches[i]} ${descriptions[i]}" >> "$REPO_FILE_FULL"
+        fi
+    done
+
+    rm -f "$json"
 }
 
 

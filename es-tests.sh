@@ -7,12 +7,12 @@
 # Bear in mind that many of those mods are still in development, and you need
 # to know how to fix things if something break.
 #
-# meleu - May-2017
+# meleu - Jun-2017
 
 
 # globals ####################################################################
 
-VERSION="delta3"
+VERSION="delta4"
 
 # TESTERS: set NO_WARNING_FLAG to 1 if you don't want that warning message.
 NO_WARNING_FLAG=0
@@ -52,6 +52,18 @@ function dialogMenu() {
         2>&1 > /dev/tty
 }
 
+function dialogMenuHelp() {
+    local text="$1"
+    shift
+    dialog --no-mouse \
+        --backtitle "$BACKTITLE" \
+        --cancel-label "Back" \
+        --ok-label "OK" \
+        --item-help \
+        --menu "$text\n\nChoose an option." 17 75 10 "$@" \
+        2>&1 > /dev/tty
+}
+
 function dialogYesNo() {
     dialog --no-mouse --backtitle "$BACKTITLE" --yesno "$@" 15 75 2>&1 > /dev/tty
 }
@@ -74,7 +86,7 @@ function main_menu() {
         choice=$(dialog --backtitle "$BACKTITLE" --title " MAIN MENU " \
             --ok-label OK --cancel-label Exit \
             --menu "What do you want to do?" 17 75 10 \
-            B "Build an ES repo/branch from the list" \
+            B "Build an ES branch from the list" \
             E "Edit the ES repo/branch list" \
             C "Choose an installed ES branch to be the default" \
             R "Remove an installed unofficial ES branch" \
@@ -95,7 +107,7 @@ function main_menu() {
 
 function build_es_branch_menu() {
     if [[ ! -s "$REPO_FILE_FULL" ]]; then
-        dialogMsg "\"$REPO_FILE\" is empty!\n\nAdd some ES repo/branch first."
+        dialogMsg "\"$REPO_FILE\" is empty!\n\nAdd some ES repo/branch to the list first."
         return 1
     fi
 
@@ -104,22 +116,24 @@ function build_es_branch_menu() {
     local i
 
     while true; do
-        i=1
         options=()
-        while read -r repo branch; do
-            options+=( $((i++)) "$repo ~ $branch" )
-        done < "$REPO_FILE_FULL"
-        choice=$(dialogMenu "List of available ES repository/branch to download, build and install (from \"$REPO_FILE\")." "${options[@]}") \
+        while read -r line_number repo branch description; do
+            developer=$(get_developer "$repo")
+            options+=( "$line_number" "${developer}'s \"$branch\" branch" "$description")
+        done < <(nl -s' ' -w1 "$REPO_FILE_FULL")
+
+        choice=$(dialogMenuHelp "List of available ES branches to download, build and install (from \"$REPO_FILE\")." "${options[@]}") \
         || return 1
-        repo=$(  echo "${options[2*choice-1]}" | tr -d ' ' | cut -d'~' -f1)
-        branch=$(echo "${options[2*choice-1]}" | tr -d ' ' | cut -d'~' -f2)
+
+        repo=$(  sed -n ${choice}p "$REPO_FILE_FULL" | cut -d' ' -f1)
+        branch=$(sed -n ${choice}p "$REPO_FILE_FULL" | cut -d' ' -f2)
         es_download_build_install "$repo" "$branch"
     done
 }
 
 
 function es_download_build_install() {
-    local developer=$(echo "$repo" | sed "s#.*https://github.com/\([^/]*\)/.*#\1#")
+    local developer=$(get_developer "$repo")
     local es_src_dir=$(friendly_repo_branch_name)
     local es_install_dir="${RP_SUPPLEMENTARY_DIR}/$es_src_dir"
     es_src_dir="$SRC_DIR/$es_src_dir"
@@ -233,17 +247,15 @@ function edit_repo_branch_menu() {
     local branch
 
     while true; do
-        options=(A "Add an ES repo/branch to the list")
-        [[ -s "$REPO_FILE_FULL" ]] && options+=(D "DELETE ALL REPO/BRANCHES IN THE LIST")
+        options=(A "Add an ES branch to the list" "")
+        [[ -s "$REPO_FILE_FULL" ]] && options+=(D "DELETE ALL BRANCHES IN THE LIST" "")
 
-        while read -r line; do
-            line_number=$(echo "$line" | cut -d: -f1)
-            developer=$(echo "$line" | sed "s#.*https://github.com/\([^/]*\)/.*#\1#")
-            branch=$(echo "$line" | sed "s,[^ ]* *,,")
-            options+=( "$line_number" "Delete ${developer}'s \"$branch\" branch" )
-        done < <(nl -s: -w1 "$REPO_FILE_FULL")
+        while read -r line_number repo branch description; do
+            developer=$(get_developer "$repo")
+            options+=( "$line_number" "Delete ${developer}'s \"$branch\" branch" "$description")
+        done < <(nl -s' ' -w1 "$REPO_FILE_FULL")
 
-        choice=$(dialogMenu "Edit the ES repository/branch list \"$REPO_FILE\"." "${options[@]}") \
+        choice=$(dialogMenuHelp "Edit the ES repository/branch list \"$REPO_FILE\"." "${options[@]}") \
         || return 1
 
         case "$choice" in
@@ -269,19 +281,22 @@ function add_repo_branch() {
     local form=()
     local new_repo="$REPO_URL_TEMPLATE"
     local new_branch
+    local new_description
 
     while true; do
         form=( $(dialog --form "Enter the ES repository URL and the branch name."  17 75 5 \
-            "URL    :" 1 1 "$new_repo"   1 10 80 0 \
-            "branch :" 2 1 "$new_branch" 2 10 30 0 \
+            "URL        :" 1 1 "$new_repo"   1 13 80 0 \
+            "branch     :" 2 1 "$new_branch" 2 13 30 0 \
+            "description:" 3 1 "$new_branch" 3 13 80 0 \
             2>&1 > /dev/tty)
         ) || return 1
         new_repo="${form[0]}"
-        new_branch="${form[@]:1}"
+        new_branch="${form[1]}"
+        new_description="${form[@]:1}"
 
         dialogInfo "Adding \"$new_branch\" to the the list.\nPlease wait..."
         validate_repo_branch "$new_repo" "$new_branch" || continue
-        echo "$new_repo $new_branch" >> "$REPO_FILE_FULL"
+        echo "$new_repo $new_branch $new_description" >> "$REPO_FILE_FULL"
         return 0
     done
 }
@@ -291,7 +306,7 @@ function validate_repo_branch() {
     local repo="$(echo $1 | sed 's/\.git$//')"
     local branch="$2"
 
-    if grep -qi "$repo *$branch" "$REPO_FILE_FULL" ; then
+    if grep -qi "$repo *$branch" "$REPO_FILE_FULL" 2> /dev/null; then
         dialogMsg "The \"$branch\" branch from \"$repo\" is already in the list!\n\nNothing will be changed."
         return 1
     fi
@@ -302,7 +317,7 @@ function validate_repo_branch() {
     fi
 
     if ! curl -Is "${repo}/tree/${branch}" | grep -q '^Status: 200'; then
-        dialogMsg "This is an invalid repo/branch:\n${repo}/tree/${branch}\n(Or maybe your connection is down and the script is unable to validate repo/branch.)\n\nNothing will be changed."
+        dialogMsg "This is an invalid repo/branch:\n${repo}/tree/${branch}\n(Or maybe your connection is down and the script is unable to validate it.)\n\nNothing will be changed."
         return 1
     fi
     return 0
@@ -356,6 +371,7 @@ function remove_installed_es_menu() {
     local es_branch
 
     while true; do
+        options=()
         i=1
         for es_branch in $(get_installed_branches); do
             [[ "$es_branch" == "emulationstation" || "$es_branch" == "emulationstation-kids" ]] \
@@ -378,6 +394,7 @@ function remove_installed_es_menu() {
         remove_source_files "$SRC_DIR/$es_branch"
 
         if rp_scriptmodule_action remove "$es_branch"; then
+            sudo rm -rf "$RP_SUPPLEMENTARY_DIR/$es_branch"
             if sudo "$RP_PACKAGES_SH" emulationstation configure; then
                 dialogMsg "SUCCESS!\n\nThe \"$es_branch\" ES branch was uninstalled!\n\nThe official RetroPie ES is now the default emulationstation."
             else
@@ -391,8 +408,13 @@ function remove_installed_es_menu() {
 
 
 function friendly_repo_branch_name() {
-    local developer=$(echo "$repo" | sed "s#.*https://github.com/\([^/]*\)/.*#\1#")
+    local developer=$(get_developer "$repo")
     echo "es_${developer}_${branch}" | tr '[:upper:]' '[:lower:]'
+}
+
+
+function get_developer() {
+    echo "$1" | sed "s#.*https://github.com/\([^/]*\)/.*#\1#"
 }
 
 

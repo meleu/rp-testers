@@ -438,7 +438,7 @@ function update_script() {
     dialogYesNo "Are you sure you want to download the latest version of \"$SCRIPT_NAME\" script?" \
     || return 1
 
-    err_msg=$(wget "$SCRIPT_URL" -O "/tmp/$SCRIPT_NAME" 2>&1) \
+    err_msg=$(curl "$SCRIPT_URL" -o "/tmp/$SCRIPT_NAME" 2>&1) \
     && err_msg=$(cp "/tmp/$SCRIPT_NAME" "$SCRIPT_DIR/$SCRIPT_NAME" 2>&1) \
     || err_flag=1
 
@@ -448,6 +448,7 @@ function update_script() {
         return 1
     fi
 
+    dialogMsg "SUCCESS!\n\nThe script was successfully updated.\n\nPress enter to run the latest version."
     [[ -x "$SCRIPT_DIR/$SCRIPT_NAME" ]] && exec "$SCRIPT_DIR/$SCRIPT_NAME" --no-warning
     return 1
 }

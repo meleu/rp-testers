@@ -7,7 +7,16 @@
 # Bear in mind that many of those mods are still in development, and you need
 # to know how to fix things if something break.
 #
-# meleu - Jun-2017
+# Acknowledgements:
+# @BuZz: my script takes advantage of some parts of RetroPie-Setup code. Your
+#        talent and rigour with the RetroPie-Setup code makes it very flexible
+#        and modular. Very well done!
+# @Zigurana : for having the idea to make this tool.
+# @TMNTturtlguy : I've made this tool based on your suggestions here.
+# @Hex : for the make clean omission tip, and many other improvements.
+# @Zigurana , @pjft , @jdrassa , @fieldofcows and other ES hackers: for improving EmulationStation.
+#
+# meleu - June-2017
 
 
 # globals ####################################################################

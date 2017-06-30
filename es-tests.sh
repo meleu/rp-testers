@@ -511,6 +511,10 @@ function rpSwap() {
 
 function load_open_pull_requests_info() {
     if ! dpkg-query -W jq; then
+        if ! which apt-get 2>/dev/null; then
+            dialogMsg "To use this feature you need to install the \"jq\" package.\n\nPlease, install it and try again."
+            return 1
+        fi
         dialogYesNo "To use this feature you need to install the \"jq\" package.\nIt's a small package (less than 1MB) used to parse data needed to build the repository/branch list from open Pull Requests\n\nDo you want to install it now?" \
         || return 1
         sudo apt-get install jq

@@ -12,7 +12,7 @@
 #        talent and rigour with the RetroPie-Setup code makes it very flexible
 #        and modular. Very well done!
 # @Zigurana : for having the idea to make this tool.
-# @TMNTturtlguy : I've made this tool based on your suggestions here.
+# @TMNTturtlguy : I've made this tool based on your suggestion.
 # @Hex : for the make clean omission tip, and many other improvements.
 # @Zigurana , @pjft , @jdrassa , @fieldofcows and other ES hackers: for improving EmulationStation.
 #

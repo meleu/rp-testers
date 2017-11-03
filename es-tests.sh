@@ -123,19 +123,23 @@ function build_es_branch_menu() {
     local options=()
     local choice
     local i
+    local pr
+    local repo
+    local branch
+    local description
 
     while true; do
         options=()
-        while read -r line_number repo branch description; do
+        while read -r pr repo branch description; do
             developer=$(get_developer "$repo")
-            options+=( "$line_number" "${developer}'s \"$branch\" branch" "$description")
-        done < <(nl -s' ' -w1 "$REPO_FILE_FULL")
+            options+=( "$pr" "${developer}'s \"$branch\" branch" "$description")
+        done < "$REPO_FILE_FULL"
 
         choice=$(dialogMenuHelp "List of available ES branches to download, build and install (from \"$REPO_FILE\")." "${options[@]}") \
         || return 1
 
-        repo=$(  sed -n ${choice}p "$REPO_FILE_FULL" | cut -d' ' -f1)
-        branch=$(sed -n ${choice}p "$REPO_FILE_FULL" | cut -d' ' -f2)
+        repo=$(  sed -n "/^${choice}/p" "$REPO_FILE_FULL" | cut -d' ' -f2)
+        branch=$(sed -n "/^${choice}/p" "$REPO_FILE_FULL" | cut -d' ' -f3)
         es_download_build_install "$repo" "$branch"
     done
 }
@@ -222,7 +226,7 @@ function rp_scriptmodule_action() {
 
     [[ -z "$module_id" ]] && module_id=$(basename "$es_src_dir")
 
-    if [[ "$module_id" == emulationstation || "$module_id" == emulationstation-kids ]]; then
+    if [[ "$module_id" == emulationstation || "$module_id" == emulationstation-dev ]]; then
         sudo "$RP_PACKAGES_SH" "$module_id" "$action"
         return $?
     fi
@@ -260,10 +264,10 @@ function edit_repo_branch_menu() {
         options+=(A "Add an ES branch to the list" "")
         [[ -s "$REPO_FILE_FULL" ]] && options+=(D "DELETE ALL BRANCHES IN THE LIST" "")
 
-        while read -r line_number repo branch description; do
+        while read -r pr repo branch description; do
             developer=$(get_developer "$repo")
-            options+=( "$line_number" "Delete ${developer}'s \"$branch\" branch" "$description")
-        done < <(nl -s' ' -w1 "$REPO_FILE_FULL")
+            options+=( "$pr" "${developer}'s \"$branch\" branch" "$description")
+        done < "$REPO_FILE_FULL"
 
         choice=$(dialogMenuHelp "Edit the ES repository/branch list \"$REPO_FILE\"." "${options[@]}") \
         || return 1
@@ -277,8 +281,8 @@ function edit_repo_branch_menu() {
                 || continue
                 echo -n > "$REPO_FILE_FULL"
                 ;;
-            *)  repo=$(  sed -n ${choice}p "$REPO_FILE_FULL" | cut -d' ' -f1)
-                branch=$(sed -n ${choice}p "$REPO_FILE_FULL" | cut -d' ' -f2)
+            *)  repo=$(  sed -n "/^${choice}/p" "$REPO_FILE_FULL" | cut -d' ' -f2)
+                branch=$(sed -n "/^${choice}/p" "$REPO_FILE_FULL" | cut -d' ' -f3)
                 dialogYesNo "Are you sure you want to delete the following line from \"$REPO_FILE_FULL\"?\n\n$repo $branch" \
                 || continue
                 sed -i ${choice}d "$REPO_FILE_FULL"
@@ -386,7 +390,7 @@ function remove_installed_es_menu() {
         options=()
         i=1
         for es_branch in $(get_installed_branches); do
-            [[ "$es_branch" == "emulationstation" || "$es_branch" == "emulationstation-kids" ]] \
+            [[ "$es_branch" == "emulationstation" || "$es_branch" == "emulationstation-dev" ]] \
             && continue
             options+=( $((i++)) "$es_branch" )
         done
@@ -520,6 +524,7 @@ function load_open_pull_requests_info() {
         sudo apt-get install jq
     fi
     local json="/tmp/esPRs.json"
+    local pr_numbers=()
     local repos=()
     local branches=()
     local descriptions=()
@@ -531,6 +536,7 @@ function load_open_pull_requests_info() {
     
     oldIFS="$IFS"
     IFS=$'\n'
+    pr_numbers=( $(jq -r '.[] | .number' "$json") )
     repos=( $(jq -r '.[] | .head.repo.html_url' "$json") )
     branches=( $(jq -r '.[] | .head.ref' "$json") )
     descriptions=( $(jq -r '.[] | .title' "$json") )
@@ -541,9 +547,9 @@ function load_open_pull_requests_info() {
 
         line_number=$(grep -ni "${repos[i]} ${branches[i]}" "$REPO_FILE_FULL" | cut -d: -f1)
         if [[ "$line_number" =~ ^[0-9]+$ ]]; then
-            sed -i "${line_number}c ${repos[i]} ${branches[i]} ${descriptions[i]}" "$REPO_FILE_FULL"
+            sed -i "${line_number}c ${pr_numbers[i]} ${repos[i]} ${branches[i]} ${descriptions[i]}" "$REPO_FILE_FULL"
         else
-            echo "${repos[i]} ${branches[i]} ${descriptions[i]}" >> "$REPO_FILE_FULL"
+            echo "${pr_numbers[i]} ${repos[i]} ${branches[i]} ${descriptions[i]}" >> "$REPO_FILE_FULL"
         fi
     done
 
